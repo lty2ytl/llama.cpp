@@ -1,0 +1,72 @@
+name: Build llama.cpp Windows (CUDA + Vulkan)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:          # 允许手动触发
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive   # 拉取 ggml 子模块
+
+      # ===== 1. 安装 Vulkan SDK（GitHub Actions 镜像默认不带） =====
+      - name: Install Vulkan SDK
+        shell: pwsh
+        run: |
+          # 获取最新版本号
+          $json = Invoke-RestMethod -Uri "https://vulkan.lunarg.com/sdk/latest.json"
+          $version = $json.windows.version
+          $installer = "VulkanSDK-$version-Installer.exe"
+          $url = "https://sdk.lunarg.com/sdk/download/$version/windows/$installer"
+          Write-Host "Downloading Vulkan SDK $version ..."
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          Write-Host "Installing ..."
+          Start-Process -Wait -FilePath $installer -ArgumentList "/S"
+          # 设置环境变量供后续 CMake 使用
+          $sdkPath = "C:\VulkanSDK\$version"
+          Write-Host "VULKAN_SDK=$sdkPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "$sdkPath\Bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      # ===== 2. CMake 配置（启用 CUDA + Vulkan） =====
+      - name: Configure CMake
+        run: |
+          cmake -B build ^
+                -DCMAKE_BUILD_TYPE=Release ^
+                -DLLAMA_CUBLAS=ON ^
+                -DLLAMA_VULKAN=ON ^
+                -DLLAMA_BUILD_TESTS=OFF ^
+                -DLLAMA_BUILD_EXAMPLES=ON ^
+                -DLLAMA_NATIVE=OFF ^
+                -DCMAKE_CUDA_ARCHITECTURES="52;61;70;75;80;86;89;90"
+
+      # ===== 3. 编译（并行） =====
+      - name: Build
+        run: cmake --build build --config Release -j $env:NUMBER_OF_PROCESSORS
+
+      # ===== 4. 收集产物（exe + vulkan-1.dll） =====
+      - name: Prepare artifacts
+        shell: pwsh
+        run: |
+          mkdir artifacts -Force
+          # 复制所有 exe
+          Copy-Item build/bin/Release/*.exe -Destination artifacts/
+          # 复制 Vulkan 运行时 DLL（方便在没有安装 Vulkan 的系统上运行）
+          $vulkanDll = "$env:VULKAN_SDK\Bin\vulkan-1.dll"
+          if (Test-Path $vulkanDll) {
+            Copy-Item $vulkanDll -Destination artifacts/
+          }
+          # 列出产物
+          Get-ChildItem artifacts/
+
+      # ===== 5. 上传 Artifact =====
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-cpp-windows-cuda+vulkan
+          path: artifacts/
