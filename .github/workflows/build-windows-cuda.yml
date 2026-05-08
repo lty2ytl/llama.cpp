@@ -19,7 +19,7 @@ jobs:
         run: |
           cmake -B build `
                 -DCMAKE_BUILD_TYPE=Release `
-                -DLLAMA_CUBLAS=ON `
+                -DGGML_CUDA=ON `                        # <-- 关键改动
                 -DLLAMA_BUILD_TESTS=OFF `
                 -DLLAMA_BUILD_EXAMPLES=ON `
                 -DLLAMA_NATIVE=OFF `
