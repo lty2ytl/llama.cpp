@@ -3,7 +3,7 @@ name: Build llama.cpp Windows (CUDA only)
 on:
   push:
     branches: [ main, master ]
-  workflow_dispatch:          # 支持手动触发
+  workflow_dispatch:
 
 jobs:
   build:
@@ -15,59 +15,35 @@ jobs:
         with:
           submodules: recursive
 
-      # ===== CMake 配置：开启 CUDA，关闭 Vulkan =====
       - name: Configure CMake (CUDA)
         run: |
-          cmake -B build ^
-                -DCMAKE_BUILD_TYPE=Release ^
-                -DLLAMA_CUBLAS=ON ^
-                -DLLAMA_BUILD_TESTS=OFF ^
-                -DLLAMA_BUILD_EXAMPLES=ON ^
-                -DLLAMA_NATIVE=OFF ^
-                -DCMAKE_CUDA_ARCHITECTURES="52;61;70;75;80;86;89;90"
+          cmake -B build `
+                -DCMAKE_BUILD_TYPE=Release `
+                -DLLAMA_CUBLAS=ON `
+                -DLLAMA_BUILD_TESTS=OFF `
+                -DLLAMA_BUILD_EXAMPLES=ON `
+                -DLLAMA_NATIVE=OFF `
+                "-DCMAKE_CUDA_ARCHITECTURES=52;61;70;75;80;86;89;90"
 
-      # ===== 编译（并行） =====
       - name: Build
         run: cmake --build build --config Release -j $env:NUMBER_OF_PROCESSORS
 
-      # ===== 整理产物（exe + CUDA 运行时 DLL） =====
       - name: Prepare artifacts
         shell: pwsh
         run: |
           mkdir artifacts -Force
-
-          # 复制所有可执行文件
           Copy-Item build/bin/Release/*.exe -Destination artifacts/
-
-          # 复制 CUDA 运行时 DLL（使 exe 可以不依赖 CUDA Toolkit 运行）
-          $cudaPath = $env:CUDA_PATH   # 例如 C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.x
+          $cudaPath = $env:CUDA_PATH
           if ($cudaPath) {
-            Write-Host "CUDA_PATH: $cudaPath"
-            # 复制 cudart, cublas, cublasLt 等常见运行时库
-            $dlls = @(
-              "cudart64_*.dll",
-              "cublas64_*.dll",
-              "cublasLt64_*.dll",
-              "cufft64_*.dll",          # 可选，如果模型用到
-              "curand64_*.dll",         # 可选
-              "cusolver64_*.dll",       # 可选
-              "cusparse64_*.dll"        # 可选
-            )
+            $dlls = @("cudart64_*.dll","cublas64_*.dll","cublasLt64_*.dll")
             foreach ($pattern in $dlls) {
               Get-ChildItem "$cudaPath\bin\$pattern" -ErrorAction SilentlyContinue | ForEach-Object {
                 Copy-Item $_.FullName -Destination artifacts/
-                Write-Host "Copied $($_.Name)"
               }
             }
-          } else {
-            Write-Warning "CUDA_PATH not found, skip copying CUDA DLLs"
           }
-
-          # 列出产物
-          Write-Host "=== Artifacts ==="
           Get-ChildItem artifacts/
 
-      # ===== 上传 Artifact =====
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
